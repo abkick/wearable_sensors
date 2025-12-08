@@ -5,18 +5,54 @@
 #include "max32630fthr.h"  // allows for setting pin voltage
 #include "TMP_1826.h"
 #include <cstdint>
+#include "adc.h"
+#include "tmr_utils.h"
+
+//// (DATA SAVING ADDITION)
+#include "SDBlockDevice.h"
+#include "FATFileSystem.h"
+#include <chrono>
+#include <cstdlib>
+
 
 MAX32630FTHR board(MAX32630FTHR::VIO_3V3);  // Sets the microcontroller pins to 3.3 volts
 
 using namespace OneWire;
 using namespace RomCommands;
 
-#define NUM_TMP 3  // number of TMP1826 sensors connected to the 1-wire bus
+#define NUM_TMP 4 // number of TMP1826 sensors connected to the 1-wire bus
 #define WAIT_TIME_MS 300 
-DigitalOut led1(LED1);
+
 DigitalOut rLED(LED1, LED_OFF);
 DigitalOut gLED(LED2, LED_OFF);
 DigitalOut bLED(LED3, LED_OFF);
+
+
+// SD card device: pins for MAX32630FTHR
+SDBlockDevice sd(P0_5, P0_6, P0_4, P0_7);
+FATFileSystem fs("sd");
+
+// Timer for timestamps
+Timer sample_timer;
+
+// SD initialization + CSV header
+int init_sd_and_file() {
+    int err = sd.init();
+    if (err) return err;
+
+    err = fs.mount(&sd);
+    if (err) {
+        err = fs.reformat(&sd);
+        if (err) return err;
+    }
+
+    FILE *fp = fopen("/sd/temp_demo.csv", "w");
+    if (!fp) return -1;
+
+    fprintf(fp, "time_ms,temp0,temp1,temp2\n");
+    fclose(fp);
+    return 0;
+}
 
 
 
@@ -69,19 +105,19 @@ int main()
 
     printf("This is WIP clot detector project running on Mbed OS %d.%d.%d.\n", MBED_MAJOR_VERSION, MBED_MINOR_VERSION, MBED_PATCH_VERSION);
     rLED = LED_ON;
-    if(tmp_interface.ProgramAll(tmp_interface.TMP1826_config)) {
-        printf("PROGRAMING FAILED!!!!!!!\n");
-        return 2;
-    } else {
-        printf("Programing success\n");
-    }
+    //if(tmp_interface.ProgramAll(tmp_interface.TMP1826_config)) {
+    //    printf("PROGRAMING FAILED!!!!!!!\n");
+    //    return 2;
+    //} else {
+    //    printf("Programing success\n");
+    //}
 
     thread_sleep_for(1000);
     tmp_interface.SearchDevices(address, NUM_TMP);
 
-    printf("%d addresses:", NUM_TMP);
+    printf("%d addresses:", NUM_TMP+1);
     for(int i=0; i<NUM_TMP; i++){
-        printf("\n%d: ", NUM_TMP);
+        printf("\n%d: ", i);
         for(int j=0; j<8; j++) printf("%0x",address[i][j]);
     }
     
@@ -90,8 +126,10 @@ int main()
     thread_sleep_for(1000);
     rLED = LED_OFF;
     bLED = LED_ON;
-    //if(tmp_interface.ProgramConfig(&address[0][1], tmp_interface.TMP1826_config)) {
-    //    printf("PROGRAMING FAILED!!!!!!!\n");
+    //int status = 0;
+    //status = tmp_interface.ProgramConfig(&address[0][1], tmp_interface.TMP1826_config);
+    //if(status) {
+    //    printf("PROGRAMING FAILED!!!!!!!\nerror code %d\n", status);
     //    return 2;
     //} else {
     //    printf("Programing success\n");
@@ -100,10 +138,27 @@ int main()
     gLED = LED_OFF;
     bLED = LED_OFF;
     std::uint8_t buffer[18];
+    tmp_interface.OneShotConversion();
+    thread_sleep_for(1000);
+
+    //// NEW (DATA SAVING ADDITION)
+    bool sd_ok = (init_sd_and_file() == 0);
+    sample_timer.start();
+    //// END NEW
+
+
     while (true)
     {
+        int rnd_led = rand()%3;
+        switch (rnd_led) {
+            case 0: rLED = !rLED; break;
+            case 1: gLED = !gLED; break;
+            case 2: bLED = !bLED; break;
+            default: break;
+        }
+        
+        
 
-        bLED = LED_ON;
         //tmp_interface.OneShotConversion();
         //thread_sleep_for(5);
 
@@ -118,10 +173,11 @@ int main()
             tmp_interface.GetDebugTemperature(address[k], buffer); // use nullptr if 64bit address is not used
             std::int16_t bit_temperature = (buffer[TMP1826::TEMP_RESULT_L] + (buffer[TMP1826::TEMP_RESULT_H]<<8));
             temps[k] = static_cast<float>(bit_temperature * BITS_TO_TEMP_16);;
+            printf("%3.1f\t", temps[k]);
         }
-        printf("%.2f°C\t%.2f°C\t%.2f°C\n", temps[0], temps[1], temps[2]);
+        printf("\n");
         tmp_interface.OneShotConversion();
-        thread_sleep_for(50);
+        thread_sleep_for(1000);
         //printf("//\t//\t//\t//\t//\t//\t//\t//\n");
         //for (int i = 0; i<25; i++) {
         //    temperature = NAN;
@@ -132,17 +188,29 @@ int main()
         //    //OWM_SetExtPullup(MXC_OWM, 0);
         //}
 
-        //thread_sleep_for(5000);
-        bLED = LED_OFF;
-        gLED = LED_ON;
-        //printf("//\t//\t//\t//\t//\t//\t//\t//\n");
 
-        //for (int i=0; i<10; i++){
-        //    if(!tmp_interface.OneShotConversion()) break;
-        //    printf("failed to oneshot convert x%d\n", i);
-        //} 
 
-        
+        //// NEW 
+        uint64_t t_ms = sample_timer.read_ms();
+        if (sd_ok) {
+            FILE *fp = fopen("/sd/temp_demo.csv", "a");
+            if (fp) {
+                fprintf(fp, "%llu",
+                    (unsigned long long)t_ms,
+                    temps[0], temps[1], temps[2]);
+
+                for (int k=0; k<NUM_TMP; k++){
+                    fprintf(fp,",%.3f", temps[k]);
+                }
+                fprintf(fp,"\n");
+                fclose(fp);
+            } else {
+                sd_ok = false;
+            }
+        }
+        //// END
+
+
         //for (int i = 0; i<25; i++) {
         //    temperature = NAN;
         //    temperature = tmp_interface.Temperature(address);
@@ -151,10 +219,7 @@ int main()
         //    thread_sleep_for(5);
         //    //OWM_SetExtPullup(MXC_OWM, 0);
         //}
-        rLED = LED_OFF;
-        gLED = LED_OFF;
-        bLED = LED_OFF;
-        //thread_sleep_for(5000);
+
     }
 }
 

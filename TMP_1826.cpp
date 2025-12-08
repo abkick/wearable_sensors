@@ -7,7 +7,7 @@
 #include "TMP_1826.h"
 
 /***
-______Typical Communication Flow____
+______Typical Communication Flow____   (Copied from the TMP1826 Datasheet)
 • Start with the Reset Sequence
 • If the host must determine which target devices are present on the bus, it should perform a search to detect
 the 64-bit device address of the devices.
@@ -212,6 +212,7 @@ int TMP1826::SearchDevices(std::uint8_t addresses[][ADDRSIZE], int num){
         if(!OWM_Reset(MXC_OWM)) return ERROR_RESET;
         OWM_WriteByte(MXC_OWM, SEARCHADDR);
         OWM_Read(MXC_OWM, &addresses[n][0], ADDRSIZE);
+        thread_sleep_for(45);
     }
     return SUCCESS;
 };
