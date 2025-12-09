@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <iostream>
-
 #include "TMP_1826.h"
 
 /***
@@ -36,11 +35,25 @@ operation.
 
 
 
-int TMP1826::init (){
+int TMP1826::init (bool long_line_enable, bool overdrive_enable){
     OWM_Shutdown(MXC_OWM);
+    // setting up onewire
+    owm_cfg_t m_owmCfg;
+    sys_cfg_owm_t m_sysCfgOwm;
+    m_sysCfgOwm.clk_scale = CLKMAN_SCALE_AUTO;
+    m_owmCfg.ext_pu_mode = OWM_EXT_PU_ACT_LOW; // MAX32630fthr has built in strongpullup
+    ioman_cfg_t cfg = IOMAN_OWM(1, 1);
+    m_sysCfgOwm.io_cfg = cfg;
+    m_owmCfg.int_pu_en = 1;
+    m_owmCfg.long_line_mode = long_line_enable;
+    if(overdrive_enable){
+        m_owmCfg.overdrive_spec = OWM_OVERDRIVE_10US;
+    }   else m_owmCfg.overdrive_spec = OWM_OVERDRIVE_UNUSED; 
+
     thread_sleep_for(500);
-//   OWM_Init(MXC_OWM, &m_owmCfg, &m_sysCfgOwm);
+    OWM_Init(MXC_OWM, &m_owmCfg, &m_sysCfgOwm);
     str_pu = 1;
+
     //                                0x80 | 0x40 | 0x20 | 0x10 | 0x08 | 0x04 | 0x02 | 0x01 = 0xFF = 11111111b
     TMP1826_config[CONFIG1]         = TEMP_FMT | 0x40 | CONV_TIME_SEL | ALERT_MODE; // =0xF0
     TMP1826_config[CONFIG2]         = OD_EN | 0x18; // 0x18 = fast arbitration mode

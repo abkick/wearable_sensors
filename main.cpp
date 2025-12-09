@@ -1,12 +1,13 @@
 
 /***** Includes *****/
 #include "mbed.h"
-#include "OneWire.h"
+//#include "OneWire.h"
 #include "max32630fthr.h"  // allows for setting pin voltage
 #include "TMP_1826.h"
 #include <cstdint>
 #include "adc.h"
 #include "tmr_utils.h"
+#include "owm.h"
 
 //// (DATA SAVING ADDITION)
 #include "SDBlockDevice.h"
@@ -18,8 +19,8 @@
 
 MAX32630FTHR board(MAX32630FTHR::VIO_3V3);  // Sets the microcontroller pins to 3.3 volts
 
-using namespace OneWire;
-using namespace RomCommands;
+//using namespace OneWire;
+//using namespace RomCommands;
 
 #define NUM_TMP 4 // number of TMP1826 sensors connected to the 1-wire bus
 #define WAIT_TIME_MS 300 
@@ -69,33 +70,19 @@ int main()
     int16_t acc[3], gyr[3];
 
     TMP1826 tmp_interface;
-    tmp_interface.init();
-    //Get 1-Wire Master (owm) instance
-    //         (extWeakPullup, extStrongPullup, long_line_mode)
-    MCU_OWM owm(false, true, false);
+    tmp_interface.init(false, false); // will also initialize One_wire
+
     std::uint8_t address[NUM_TMP][8];
     float temps[NUM_TMP];
-    
-    //Make sure owm is initialized
-    OneWireMaster::CmdResult result = owm.OWInitMaster();
-    if(!result) printf("\nOneWireMaster initializated\n");
-    else {
-        printf("OneWireMaster failed to init!!\n");
-        return 1;
-    }
-    if(owm.m_owmCfg.long_line_mode) printf("long_line_mode is active!\n");
-    if(owm.m_owmCfg.int_pu_en) printf("int_pu_en is active!\n");
-    if(owm.m_owmCfg.ext_pu_mode != OWM_EXT_PU_UNUSED) printf("ext_pu_mode is active!\n");
-    if(owm.m_owmCfg.overdrive_spec) printf("overdrive_spec is active!\n");
 
-    
+
     rLED = !rLED;
 
-    owm.OWReset();
+    OWM_Reset(MXC_OWM);
 
     for(int i; i<10; i++){
         rLED = LED_ON;
-        if(!owm.OWReset()){
+        if(OWM_Reset(MXC_OWM)){
             printf("\nReset response recieved!\n");
             rLED = !rLED;
             gLED = LED_ON;

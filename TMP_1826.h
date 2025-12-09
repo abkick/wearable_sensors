@@ -95,7 +95,7 @@ public:
     bool str_pu; // is in bus powered "strong pullup" configuration, (using a FET/transitor as a switchable low impedance current path)
 
 
-    int init ();
+    int init (bool long_line_enable, bool overdrive_enable);
 
     std::uint8_t CalculateCRC(const std::uint8_t* byte_block, const int num_bytes); // returns 0 upon success, returns 1 if crc failed
 
