@@ -1,7 +1,6 @@
 
 /***** Includes *****/
 #include "mbed.h"
-//#include "OneWire.h"
 #include "max32630fthr.h"  // allows for setting pin voltage
 #include "TMP_1826.h"
 #include <cstdint>
@@ -9,22 +8,24 @@
 #include "tmr_utils.h"
 #include "owm.h"
 
-//// (DATA SAVING ADDITION)
+//// (SD card)
 #include "SDBlockDevice.h"
 #include "FATFileSystem.h"
 #include <chrono>
 #include <cstdlib>
-
+/// IMU
 #include "bmi160.h"
+
+
+
 
 MAX32630FTHR board(MAX32630FTHR::VIO_3V3);  // Sets the microcontroller pins to 3.3 volts
 
-//using namespace OneWire;
-//using namespace RomCommands;
-
-#define NUM_TMP 4 // number of TMP1826 sensors connected to the 1-wire bus
+#define NUM_TMP 16 // number of TMP1826 sensors connected to the 1-wire bus
 #define WAIT_TIME_MS 300 
 
+PwmOut buzzer(P5_0);
+DigitalOut tmp_rail_reset(P3_0, 1);
 DigitalOut rLED(LED1, LED_OFF);
 DigitalOut gLED(LED2, LED_OFF);
 DigitalOut bLED(LED3, LED_OFF);
@@ -36,6 +37,8 @@ FATFileSystem fs("sd");
 
 // Timer for timestamps
 Timer sample_timer;
+
+BMI160 imu(P5_7, P6_0);
 
 // SD initialization + CSV header
 int init_sd_and_file() {
@@ -56,10 +59,20 @@ int init_sd_and_file() {
     return 0;
 }
 
-BMI160 imu(P5_7, P6_0);
+void rail_reset(){
+    gLED = LED_ON;
+    tmp_rail_reset = 1;
+    thread_sleep_for(100);
+    tmp_rail_reset = 0;
+    gLED = !gLED;
+    thread_sleep_for(100);
+}
+
 
 int main()
 {   
+
+    rLED = LED_ON;
     printf("BMI160 Init...\n");
 
     if (!imu.begin()) {
@@ -68,7 +81,10 @@ int main()
     }
     printf("BMI160 ready.\n");
     int16_t acc[3], gyr[3];
+    int16_t movcheck[3] =  {0,0,0}; //holder variable for checking value
+    int sitting=0;
 
+    tmp_rail_reset = 0;
     TMP1826 tmp_interface;
     tmp_interface.init(false, false); // will also initialize One_wire
 
@@ -76,7 +92,7 @@ int main()
     float temps[NUM_TMP];
 
 
-    rLED = !rLED;
+
 
     OWM_Reset(MXC_OWM);
 
@@ -96,34 +112,29 @@ int main()
 
 
 
-    thread_sleep_for(2000);
+    thread_sleep_for(1000);
     rLED = LED_OFF;
     gLED = LED_OFF;
     bLED = LED_OFF;
 
     printf("This is WIP clot detector project running on Mbed OS %d.%d.%d.\n", MBED_MAJOR_VERSION, MBED_MINOR_VERSION, MBED_PATCH_VERSION);
-    rLED = LED_ON;
-    //if(tmp_interface.ProgramAll(tmp_interface.TMP1826_config)) {
-    //    printf("PROGRAMING FAILED!!!!!!!\n");
-    //    return 2;
-    //} else {
-    //    printf("Programing success\n");
-    //}
 
     thread_sleep_for(1000);
+    printf("Now searching for tmp1826 sensors");
+    gLED = LED_ON;
     tmp_interface.SearchDevices(address, NUM_TMP);
-
-    printf("%d addresses:", NUM_TMP+1);
+    thread_sleep_for(10);
+    gLED = LED_OFF;
+    bLED = LED_ON;
+    printf("%d addresses:", NUM_TMP);
     for(int i=0; i<NUM_TMP; i++){
         printf("\n%d: ", i);
         for(int j=0; j<8; j++) printf("%0x",address[i][j]);
     }
-    
     printf("\n");
+    thread_sleep_for(500);
+
     
-    thread_sleep_for(1000);
-    rLED = LED_OFF;
-    bLED = LED_ON;
     //int status = 0;
     //status = tmp_interface.ProgramConfig(&address[0][1], tmp_interface.TMP1826_config);
     //if(status) {
@@ -137,7 +148,7 @@ int main()
     bLED = LED_OFF;
     std::uint8_t buffer[18];
     tmp_interface.OneShotConversion();
-    thread_sleep_for(1000);
+    thread_sleep_for(500);
 
     //// NEW (DATA SAVING ADDITION)
     bool sd_ok = (init_sd_and_file() == 0);
@@ -145,11 +156,28 @@ int main()
     sample_timer.start();
     //// END NEW
 
-
+    bool alarm = false;
+    int n_loop = 0;
     while (true)
     {
+        if (n_loop % 10==9){
+            rail_reset();
+            tmp_interface.OneShotConversion();
+        }
+        n_loop++;
+        if(alarm){
+            for(int i=0; i<3; i++)
+            {
+                buzzer.period_us(1000000/2000);
+                buzzer.write(0.50f); // 50% duty cycle
+                thread_sleep_for(100); // 1 beat
+                buzzer.period_us(0); // Sound off
+                thread_sleep_for(100); // 1 beat
+            }
+        }
+    
         int rnd_led = rand()%3;
-        switch (rnd_led) {
+        switch (rnd_led) { // flip state (on/off) of a random LED
             case 0: rLED = !rLED; break;
             case 1: gLED = !gLED; break;
             case 2: bLED = !bLED; break;
@@ -162,15 +190,6 @@ int main()
                    gyr[0], gyr[1], gyr[2]);
         }
 
-        //tmp_interface.OneShotConversion();
-        //thread_sleep_for(5);
-
-        //for (int i=0; i<10; i++){
-        //    thread_sleep_for(50);
-        //    if(!tmp_interface.OneShotConversion()) break;
-        //    printf("failed to oneshot convert x%d\n", i);
-        //    thread_sleep_for(50);
-        //} 
     
         for (int k=0; k<NUM_TMP; k++){
             tmp_interface.GetDebugTemperature(address[k], buffer); // use nullptr if 64bit address is not used
@@ -181,19 +200,26 @@ int main()
         printf("\n");
         tmp_interface.OneShotConversion();
         thread_sleep_for(1000);
-        //printf("//\t//\t//\t//\t//\t//\t//\t//\n");
-        //for (int i = 0; i<25; i++) {
-        //    temperature = NAN;
-        //    temperature = tmp_interface.GetTemperature(address);
-        //    printf("temperature with address = %.2f\n", temperature);
-        //    //OWM_SetExtPullup(MXC_OWM, 1);
-        //    thread_sleep_for(5);
-        //    //OWM_SetExtPullup(MXC_OWM, 0);
-        //}
 
+        if(acc[1] > -10000){ // checking to see if leg is verticle
+            sitting += 1;
+        }
+        else{
+            sitting = 0;
+        }
+        float temp_max=0;
+        for(int t=0; t<NUM_TMP; t++){           // Get avg temp across all sensors
+            if(temps[t]>temp_max) temp_max = temps[t];
+        }
 
+        if(sitting > 10 || temp_max > 35.5){      //Alarm flag raise
+            alarm = true;
+        }
+        else{                                         //Alarm Flag Lower
+            alarm = false;
+        }
 
-        //// NEW 
+        //// sdcard 
         uint64_t t_ms = sample_timer.read_ms();
         if (sd_ok) {
             FILE *fp = fopen("/sd/temp_demo.csv", "a");
@@ -212,15 +238,6 @@ int main()
         }
         //// END
 
-
-        //for (int i = 0; i<25; i++) {
-        //    temperature = NAN;
-        //    temperature = tmp_interface.Temperature(address);
-        //    printf("temperature = %.2f\n", temperature);
-        //    //OWM_SetExtPullup(MXC_OWM, 1);
-        //    thread_sleep_for(5);
-        //    //OWM_SetExtPullup(MXC_OWM, 0);
-        //}
 
     }
 }
