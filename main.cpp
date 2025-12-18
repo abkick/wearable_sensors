@@ -59,6 +59,8 @@ int init_sd_and_file() {
     return 0;
 }
 
+/// The capacitors in the tmp1826 sensors keep the onewire bus high resulting in the sensors not resetting with the microcontroller
+/// Periodicly discarging the sensors seems to make it more stable, without it the addressing phase can fail after reset
 void rail_reset(){
     gLED = LED_ON;
     tmp_rail_reset = 1;
@@ -134,7 +136,7 @@ int main()
     printf("\n");
     thread_sleep_for(500);
 
-    
+    //// Programing only needs to happen once with each tmp1826
     //int status = 0;
     //status = tmp_interface.ProgramConfig(&address[0][1], tmp_interface.TMP1826_config);
     //if(status) {
@@ -143,6 +145,7 @@ int main()
     //} else {
     //    printf("Programing success\n");
     //}
+
     rLED = LED_OFF;
     gLED = LED_OFF;
     bLED = LED_OFF;
@@ -201,21 +204,21 @@ int main()
         tmp_interface.OneShotConversion();
         thread_sleep_for(1000);
 
-        if(acc[1] > -10000){ // checking to see if leg is verticle
+        if(acc[1] > -10000){ // checking to see if leg is horiz or vert
             sitting += 1;
         }
         else{
             sitting = 0;
         }
         float temp_max=0;
-        for(int t=0; t<NUM_TMP; t++){           // Get avg temp across all sensors
+        for(int t=0; t<NUM_TMP; t++){ 
             if(temps[t]>temp_max) temp_max = temps[t];
         }
 
-        if(sitting > 10 || temp_max > 35.5){      //Alarm flag raise
+        if(sitting > 10 || temp_max > 35.5){//Alarm flag raise
             alarm = true;
         }
-        else{                                         //Alarm Flag Lower
+        else{ //Alarm Flag Lower
             alarm = false;
         }
 
